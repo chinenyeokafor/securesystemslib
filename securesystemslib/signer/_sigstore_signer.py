@@ -188,7 +188,7 @@ class SigstoreSigner(Signer):
             )
         # TODO: should check ambient identity too: unfortunately IdentityToken does
         # not provide access to the expected identity value (cert SAN) in ambient case
-        if not ambient and key_identity != token.identity:
+        if not ambient and key_identity != token._unverified_claims['email']:
             raise ValueError(
                 f"Signer identity {token.identity} did not match key: {key_identity}"
             )
