@@ -416,7 +416,6 @@ class SigstoreSigner(Signer):
         # We want to access the actual signature, see
         # https://github.com/sigstore/protobuf-specs/blob/main/protos/sigstore_bundle.proto
         bundle_json = json.loads(bundle.to_json())
-        import pdb;pdb.set_trace()
         return Signature(
             self.public_key.keyid,
             bundle_json["messageSignature"]["signature"],
