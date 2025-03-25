@@ -19,7 +19,8 @@ from securesystemslib.signer._signer import (
     SecretsHandler,
     Signer,
 )
-from securesystemslib.signer._sigstore_signer import SigstoreKey, SigstoreSigner
+# from securesystemslib.signer._sigstore_signer import SigstoreKey, SigstoreSigner
+from securesystemslib.signer._diverify_sigstore_signer import SigstoreKey, SigstoreSigner
 from securesystemslib.signer._spx_signer import (
     SpxKey,
     SpxSigner,
