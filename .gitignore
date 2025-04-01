@@ -21,3 +21,5 @@ docs/_build/
 
 .env
 .venv
+credentials.json
+ctfe_public.pem

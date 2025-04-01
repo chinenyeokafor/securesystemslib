@@ -5,7 +5,7 @@ import requests
 
 
 # Device Fingerprinter
-trust_verifier = "device_fingerprinter"
+trust_verifier = "device_fingerprint"
 verifier = load_trust_verifier(trust_verifier)
 verification_result = verifier.verify()
 print(f"Device Fingerprint is: {verification_result}\n")

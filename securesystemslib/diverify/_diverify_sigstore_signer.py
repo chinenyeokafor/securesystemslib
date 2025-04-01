@@ -13,6 +13,10 @@ from cryptography.x509 import CertificateSigningRequestBuilder, Name, NameAttrib
 from cryptography.x509.oid import NameOID
 from typing import Tuple, Optional
 import base64
+import requests
+from urllib.parse import urljoin
+from typing import Dict
+
 
 from securesystemslib.exceptions import (
     UnsupportedLibraryError,
@@ -30,6 +34,17 @@ from securesystemslib.signer._signer import (
     Signer,
 )
 from securesystemslib.signer._utils import compute_default_keyid
+import configparser
+
+
+config = configparser.ConfigParser()
+config.read('stack_config.ini')
+
+DEFAULT_FULCIO_URL = config['settings']['fulcio-url']
+DEFAULT_REKOR_URL = config['settings']['rekor-url']
+DEFAULT_OAUTH_ISSUER_URL = config['settings']['oauth_issuer-url']
+SIGNING_CERT_ENDPOINT = "/api/v2/signingCert"
+TRUST_BUNDLE_ENDPOINT = "/api/v2/trustBundle"
 
 IMPORT_ERROR = "sigstore library required to use 'sigstore-oidc' keys"
 
@@ -45,8 +60,8 @@ class SigstoreKey(Key):
     and may not be supported by other implementations.
     """
 
-    DEFAULT_KEY_TYPE = "sigstore-oidc"
-    DEFAULT_SCHEME = "Fulcio"
+    DEFAULT_KEY_TYPE = "diverify"
+    DEFAULT_SCHEME = "diverify"
 
     def __init__(
         self,
@@ -75,16 +90,43 @@ class SigstoreKey(Key):
             from sigstore.models import Bundle
             from sigstore.verify import Verifier
             from sigstore.verify.policy import Identity
+            from sigstore._internal.trust import TrustedRoot
+            from sigstore._internal.rekor.client import RekorClient
+            from sigstore_protobuf_specs.dev.sigstore.trustroot.v1 import (
+                TrustedRoot as _TrustedRoot,
+            )
         except ImportError as e:
             raise VerificationError(IMPORT_ERROR) from e
 
         try:
-            verifier = Verifier.production()
+            from pathlib import Path
+            import os
+            from securesystemslib.diverify.policy import PolicyEvaluator
+            path = Path(os.path.join(os.path.dirname(__file__), "trusted_root.json"))
+            verifier = Verifier(rekor=RekorClient(DEFAULT_REKOR_URL), trusted_root=TrustedRoot(_TrustedRoot().from_json(path.read_bytes())))
+
+            bundle_data = signature.unrecognized_fields["bundle"]
+            bundle = Bundle.from_json(json.dumps(bundle_data))
+
+            # this verifies the embedded quote
+            # TODO: add support for verifying the quote
+            # verify_quote(bundle.signing_certificate.quote)
+            
+
+            # this verifies the signature against the policy
+            # the policy file should be fetched from TUF. for now we are using a local file
+            policy_path = Path(os.path.join(os.path.dirname(__file__), "policy.json"))
+            if not policy_path.exists():
+                raise FileNotFoundError(f"Policy file not found: {policy_path}")
+            policy_evaluator = PolicyEvaluator(policy_path) 
+            result = policy_evaluator.evaluate(self.keyval, bundle.signing_certificate)
+            if not result:
+                raise VerificationError("Policy evaluation failed")
+
+
             identity = Identity(
                 identity=self.keyval["identity"], issuer=self.keyval["issuer"]
             )
-            bundle_data = signature.unrecognized_fields["bundle"]
-            bundle = Bundle.from_json(json.dumps(bundle_data))
 
             verifier.verify_artifact(data, bundle, identity)
 
@@ -146,7 +188,7 @@ class SigstoreSigner(Signer):
         UnsupportedLibraryError: sigstore library not found.
     """
 
-    SCHEME = "sigstore"
+    SCHEME = "diverify"
 
     def __init__(self, token: Any, decoded_token:Any, public_key: Key):
         self._public_key = public_key
@@ -183,7 +225,7 @@ class SigstoreSigner(Signer):
         ambient = params.get("ambient", "true") == "true"
 
         if not ambient:
-            token, decoded_token = cls._get_identity_token()
+            token, decoded_token = cls._get_identity_token(limit_scope=secrets_handler)
         else:
             import jwt
             credential = detect_credential()
@@ -210,7 +252,7 @@ class SigstoreSigner(Signer):
                 f"Signer identity {identry_from_token} did not match key: {key_identity}"
             )
 
-        return cls(token, decoded_token, public_key)
+        return cls(token, decoded_token, public_key), token
 
     @classmethod
     def _get_uri(cls, ambient: bool) -> str:
@@ -241,15 +283,14 @@ class SigstoreSigner(Signer):
         return uri, key 
     
     @staticmethod
-    def _get_identity_token():
+    def _get_identity_token(limit_scope=False):
         """Retrieve an identity token using OAuth2 with Dex."""
         from jwt import decode
-        import requests
 
         client_id = "sigstore"
         client_secret = ""
 
-        auth_code, redirect_uri, code_verifier = SigstoreSigner.get_authorization_code(client_id, client_secret)
+        auth_code, redirect_uri, code_verifier = SigstoreSigner.get_authorization_code(client_id, client_secret, limit_scope=limit_scope)
 
         response = requests.post(
             "http://sigstore-dex:6000/token",
@@ -273,7 +314,7 @@ class SigstoreSigner(Signer):
         return raw_token, decode(raw_token, options={"verify_signature": False})
 
     @staticmethod
-    def get_authorization_code(client_id, client_secret):
+    def get_authorization_code(client_id, client_secret, limit_scope=False):
         """Starts a temporary web server on an available port to capture the authorization code."""
         import webbrowser
         import http.server
@@ -310,11 +351,16 @@ class SigstoreSigner(Signer):
         code_verifier, code_challenge = SigstoreSigner._generate_pkce_challenge()
         state, nonce = str(uuid.uuid4()), str(uuid.uuid4())
 
+        # Commenting this off till Dex is updated to support repo scope
+        scope = "openid+email"
+        # if limit_scope:
+        #     scope += "+repo" 
+
         # Prepare authentication URL
         auth_url = (
             f"http://sigstore-dex:6000/auth?"
             f"response_type=code&client_id={client_id}&client_secret={client_secret}&"
-            f"scope=openid+email&redirect_uri={redirect_uri}&"
+            f"scope={scope}&redirect_uri={redirect_uri}&"
             f"code_challenge={code_challenge}&code_challenge_method=S256&"
             f"state={state}&nonce={nonce}"
         )
@@ -346,10 +392,9 @@ class SigstoreSigner(Signer):
     def generate_key_pair(self) -> Tuple[ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey]:
         """Generate an EC key pair."""
         private_key = ec.generate_private_key(ec.SECP256R1())
-        public_key = private_key.public_key()
-        return private_key, public_key
+        return private_key
 
-    def create_csr(self, private_key: ec.EllipticCurvePrivateKey, email_address: str) -> str:
+    def create_csr(self, email_address: str) -> str:
         csr_builder = CertificateSigningRequestBuilder().subject_name(
             Name([
                 NameAttribute(NameOID.EMAIL_ADDRESS, email_address),
@@ -358,105 +403,85 @@ class SigstoreSigner(Signer):
             BasicConstraints(ca=False, path_length=None),
             critical=True
         )
-        
-        csr = csr_builder.sign(private_key, hashes.SHA256())
-        # return csr.public_bytes(serialization.Encoding.PEM).decode()
-        return csr
+    
+        return csr_builder
     
 
     def sign(self, payload: bytes) -> Signature:
-        """Signs payload using the OIDC token on the signer instance.
+        """Signs payload using the OIDC token and submit the signature to the transparency log
 
         Arguments:
             payload: bytes to be signed.
-
-        Raises:
-            Various errors from sigstore-python.
-
         Returns:
-            Signature.
-
-            NOTE: The relevant data is in `unrecognized_fields["bundle"]`.
-
+            Integrated entry
         """
-        try:
-            from sigstore.sign import SigningContext
-        except ImportError as e:
-            raise UnsupportedLibraryError(IMPORT_ERROR) from e
+        private_key = self.generate_key_pair()
 
-        context = SigningContext.production()
-
-        # Step 1: Generate keys
-        private_key, public_key = self.generate_key_pair()
-
-        # Step 2: Create CSR using your email address
+        # Create CSR
         try:
             email_address = self._decoded_token['email']
         except:
             email_address = self._decoded_token['sub']
+        csr = self.create_csr(email_address).sign(private_key, hashes.SHA256())
 
-        csr = self.create_csr(private_key, email_address)
+        # We assume identity token is valid and send CSR to Fulcio
+        certificate_response = self.get_fulcio_cert(csr, self._token)
 
-        # Step 3: We assume identity token is valid and send CSR to Fulcio
-        certificate_response = context._fulcio.signing_cert.post(
-                csr, self._token
-            )
+        # Sign the payload
+        hashed_input, artifact_signature = self.sign_artifact(private_key, payload)
+
+        signature_material = {
+                "hashed_input": hashed_input,
+                "artifact_signature": artifact_signature,
+                "signing_cert": certificate_response.cert
+            }
+        return self.submit_to_tlog(signature_material)
+
+    
+    from dataclasses import dataclass
+    @dataclass(frozen=True)
+    class FulcioCertificateSigningResponse:
+        from typing import List
+        cert: object
+        chain: List[object]
+
+    def get_fulcio_cert(self, csr, identity):
+        from cryptography.x509 import load_pem_x509_certificate
         
-        self.signing_cert = certificate_response.cert
+        fulcio_url=urljoin(DEFAULT_FULCIO_URL, SIGNING_CERT_ENDPOINT)
+
+        certificate_request = json.dumps({"certificateSigningRequest": base64.b64encode(csr.public_bytes(serialization.Encoding.PEM)).decode()})
+        headers = {
+            "Authorization": f"Bearer {identity}",
+            "Content-Type": "application/json",
+            "Accept": "application/pem-certificate-chain",
+        }
+        resp = requests.post(fulcio_url, certificate_request, headers=headers)
+        if not resp.ok:
+            raise Exception(resp.json().get("message", "Fulcio request failed"))
         
-
-        # Step 4: Sign the payload
-        proposed_entry, content = self.sign_artifact(private_key, payload)
-
-        # Submit the proposed entry to the transparency log
-        entry = context._rekor.log.entries.post(proposed_entry)
-
-        bundle = Bundle._from_parts(self.signing_cert, content, entry,)
-
-        # We want to access the actual signature, see
-        # https://github.com/sigstore/protobuf-specs/blob/main/protos/sigstore_bundle.proto
-        bundle_json = json.loads(bundle.to_json())
-        return Signature(
-            self.public_key.keyid,
-            bundle_json["messageSignature"]["signature"],
-            {"bundle": bundle_json},
+        certs = resp.json().get("signedCertificateEmbeddedSct", {}).get("chain", {}).get("certificates", [])
+        if len(certs) < 2:
+            raise Exception("Certificate chain is too short")
+        
+        return self.FulcioCertificateSigningResponse(
+            load_pem_x509_certificate(certs[0].encode()),
+            [load_pem_x509_certificate(c.encode()) for c in certs[1:]]
         )
-
+    
     def sign_artifact(
         self,
         private_key,
         input_: bytes | sigstore_hashes.Hashed,
-    ) -> Bundle:
+    ) -> tuple[sigstore_hashes.Hashed, bytes]:
         
         """
-        Sign an artifact, and return a `Bundle` corresponding to the signed result.
-
-        The input can be one of two forms:
-
-        1. A `bytes` buffer;
-        2. A `Hashed` object, containing a pre-hashed input (e.g., for inputs
-           that are too large to buffer into memory).
-
-        Regardless of the input format, the signing operation will produce a
-        `hashedrekord` entry within the bundle. No other entry types
-        are supported by this API.
+       Sign an artifact and return the signed result as a tuple.
         """
         try:
-            import rekor_types
             from sigstore._utils import sha256_digest
-            from sigstore_protobuf_specs.dev.sigstore.common.v1 import (
-                HashOutput,
-                MessageSignature,
-            )
         except ImportError as e:
             raise UnsupportedLibraryError(IMPORT_ERROR) from e
-
-        cert = self.signing_cert
-
-        # Prepare inputs
-        b64_cert = base64.b64encode(
-            cert.public_bytes(encoding=serialization.Encoding.PEM)
-        )
 
         # Sign artifact
         hashed_input = sha256_digest(input_)
@@ -465,33 +490,7 @@ class SigstoreSigner(Signer):
             hashed_input.digest, ec.ECDSA(hashed_input._as_prehashed())
         )
 
-        content = MessageSignature(
-            message_digest=HashOutput(
-                algorithm=hashed_input.algorithm,
-                digest=hashed_input.digest,
-            ),
-            signature=artifact_signature,
-        )
-
-        # Create the proposed hashedrekord entry
-        proposed_entry = rekor_types.Hashedrekord(
-            spec=rekor_types.hashedrekord.HashedrekordV001Schema(
-                signature=rekor_types.hashedrekord.Signature(
-                    content=base64.b64encode(artifact_signature).decode(),
-                    public_key=rekor_types.hashedrekord.PublicKey(
-                        content=b64_cert.decode()
-                    ),
-                ),
-                data=rekor_types.hashedrekord.Data(
-                    hash=rekor_types.hashedrekord.Hash(
-                        algorithm=hashed_input._as_hashedrekord_algorithm(),
-                        value=hashed_input.digest.hex(),
-                    )
-                ),
-            ),
-        )
-
-        return proposed_entry, content
+        return hashed_input, artifact_signature
 
 
     @classmethod
@@ -518,3 +517,78 @@ class SigstoreSigner(Signer):
         uri, key = cls.import_(identity, issuer)
 
         return uri, key
+    
+    def submit_to_tlog(
+        self, 
+        signature_material: Dict
+    ) -> Bundle:
+        """
+        Submits the artifact signature to the Rekor log and returns a `Bundle`.
+
+        Args:
+            signature_material (Dict): Contains 'signing_cert', 'hashed_input', 
+            and 'artifact_signature'.
+
+        Returns:
+            Bundle: The signed result from the transparency log.
+
+        Raises:
+            UnsupportedLibraryError: If required libraries are missing.
+            requests.exceptions.RequestException: For HTTP request errors.
+        """
+        try:
+            import rekor_types
+            from sigstore.models import LogEntry
+            from sigstore_protobuf_specs.dev.sigstore.common.v1 import (
+                HashOutput, MessageSignature
+            )
+        except ImportError as e:
+            raise UnsupportedLibraryError("Required libraries missing.") from e
+
+        cert = signature_material['signing_cert']
+        hashed_input = signature_material["hashed_input"]
+        artifact_signature = signature_material["artifact_signature"]
+
+        b64_cert = base64.b64encode(cert.public_bytes(encoding=serialization.Encoding.PEM))
+
+        content = MessageSignature(
+            message_digest=HashOutput(
+                algorithm=hashed_input.algorithm,
+                digest=hashed_input.digest,
+            ),
+            signature=artifact_signature,
+        )
+        # If the signing was done by diverify deamon enclave, then it doesnt have _as_hashedrekord_algorithm method
+        if hasattr(hashed_input, "_as_hashedrekord_algorithm"):
+            algorithm = hashed_input._as_hashedrekord_algorithm()
+        elif hashed_input.algorithm == 1:
+            algorithm = "sha256"
+        else:
+            raise ValueError(f"Unknown hash algorithm: {hashed_input.algorithm}")
+        
+        proposed_entry = rekor_types.Hashedrekord(
+            spec=rekor_types.hashedrekord.HashedrekordV001Schema(
+                signature=rekor_types.hashedrekord.Signature(
+                    content=base64.b64encode(artifact_signature).decode(),
+                    public_key=rekor_types.hashedrekord.PublicKey(
+                        content=b64_cert.decode()
+                    ),
+                ),
+                data=rekor_types.hashedrekord.Data(
+                    hash=rekor_types.hashedrekord.Hash(
+                        algorithm=algorithm,
+                        value=hashed_input.digest.hex(),
+                    )
+                ),
+            ),
+        )
+        payload = proposed_entry.model_dump(mode="json", by_alias=True)
+        rekor_url = urljoin(DEFAULT_REKOR_URL, "/api/v1/log/entries/")
+        resp = requests.post(rekor_url, json=payload)
+        resp.raise_for_status()
+
+        entry = LogEntry._from_response(resp.json())
+        bundle = Bundle._from_parts(cert, content, entry)
+
+        bundle_json = json.loads(bundle.to_json())
+        return Signature(self.public_key.keyid, bundle_json["messageSignature"]["signature"], {"bundle": bundle_json})
