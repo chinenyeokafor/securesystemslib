@@ -23,3 +23,5 @@ docs/_build/
 .venv
 credentials.json
 ctfe_public.pem
+csr.pem
+tuf-metadata/*

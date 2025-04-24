@@ -2,10 +2,10 @@
     "mediaType": "application/vnd.dev.sigstore.trustedroot+json;version=0.1",
     "tlogs": [
         {
-            "baseUrl": "http://localhost:3000",
+            "baseUrl": "http://sigstore-rekor:3000",
             "hashAlgorithm": "SHA2_256",
             "publicKey": {
-                "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHt3jgLOZjHBFoCgIwMFWNQDr20GRTRuO85YV35xT4ycciXCH75Nn9BJYzAxEstGvpZhocwdXf6/fhQuL5VKYHg==",
+                "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEpOBUWz4VFyj5kLmAtMx94KYsFpF8ZyCt+ToGwdPMZulgTBp2nzCit1ViXNKEgiyxXm+txcYrAiriw7eRTFX/Wg==",
                 "keyDetails": "PKIX_ECDSA_P256_SHA_256",
                 "validFor": {
                     "start": "2021-01-12T11:53:27.000Z"
@@ -22,17 +22,17 @@
                 "organization": "Organization",
                 "commonName": "fulcio-root"
             },
-            "uri": "http://localhost:5000",
+            "uri": "http://sigstore-fulcio:5000",
             "certChain": {
                 "certificates": [
                     {
-                        "rawBytes": "MIICLzCCAdWgAwIBAgIUOmO+4eeDKNHln/DvMj7cBKJLXSowCgYIKoZIzj0EAwIwZTELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAklOMQ0wCwYDVQQHDARDaXR5MRUwEwYDVQQKDAxPcmdhbml6YXRpb24xDTALBgNVBAsMBFVuaXQxFDASBgNVBAMMC2Z1bGNpby1yb290MB4XDTI1MDMzMTE1NTg1OFoXDTI2MDMzMTE1NTg1OFowZTELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAklOMQ0wCwYDVQQHDARDaXR5MRUwEwYDVQQKDAxPcmdhbml6YXRpb24xDTALBgNVBAsMBFVuaXQxFDASBgNVBAMMC2Z1bGNpby1yb290MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE8PSJxZqlKbgZZFDu2WCakyxhdGPObhPzA9iib7Zatmv8/y1dAngkmuumzu8dO5Zo2gxINCg4xUrGRmrybLeNa6NjMGEwHQYDVR0OBBYEFA4ujohK0fhxj+trn1zLPsPqRvQ9MB8GA1UdIwQYMBaAFA4ujohK0fhxj+trn1zLPsPqRvQ9MA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqGSM49BAMCA0gAMEUCIQCbpXm6hjZtxzPn0gaAhRueMoEwhi1+hrRN5IYfS2m0VAIgezIjXpqTzRw2GL7lnd4uMrZ9YNZ/GXN3UrTXCbf3jpc="
+                        "rawBytes": "MIICLzCCAdWgAwIBAgIUQPbsBzT2s/wYbPz5kCBiGY08EXowCgYIKoZIzj0EAwIwZTELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAklOMQ0wCwYDVQQHDARDaXR5MRUwEwYDVQQKDAxPcmdhbml6YXRpb24xDTALBgNVBAsMBFVuaXQxFDASBgNVBAMMC2Z1bGNpby1yb290MB4XDTI1MDQwMTIyNTEzNVoXDTI2MDQwMTIyNTEzNVowZTELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAklOMQ0wCwYDVQQHDARDaXR5MRUwEwYDVQQKDAxPcmdhbml6YXRpb24xDTALBgNVBAsMBFVuaXQxFDASBgNVBAMMC2Z1bGNpby1yb290MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAESePVwhAFmBA8W0YA2/cjK0bvI6B+LbCqoSDncFYqjXtZQUPPvqpFDvjMQGlARR0LU93mGkUuO+jxIjKZn79wyaNjMGEwHQYDVR0OBBYEFPRTxp2LmFAt9cDXAQxt0SjGzwHYMB8GA1UdIwQYMBaAFPRTxp2LmFAt9cDXAQxt0SjGzwHYMA8GA1UdEwEB/wQFMAMBAf8wDgYDVR0PAQH/BAQDAgEGMAoGCCqGSM49BAMCA0gAMEUCIQCi80uX7p1tMvSoeeKAJaGklTu06lGC2V7idvBOHA+OGwIgI/wpz7U5n1r8gq7UTNQpScNsUqK3M1ctEcSgQqLgoAs="
                     }
                 ]
             },
             "validFor": {
-                "start": "2025-03-31T15:58:58+00:00",
-                "end": "2026-03-31T15:58:58+00:00"
+                "start": "2025-04-01T22:51:35+00:00",
+                "end": "2026-04-01T22:51:35+00:00"
             }
         }
     ],
@@ -41,7 +41,7 @@
             "baseUrl": "",
             "hashAlgorithm": "SHA2_256",
             "publicKey": {
-                "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEaq8X607KALed4zb8T4PM3JVm+cFgHUQRl7Zj+gUSCBI7If2rqvVlftn4ffn+otqe9zx8wdONE0wg0tMSAeqjHA==",
+                "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtlYocjWipW6gVcPJM2iW9YPZtlbEIk3KKYtCFwIoayTBMaEmv0xsmAyQFk7QkpLdkRpxBuhn9+K5XPPklcB8PA==",
                 "keyDetails": "PKIX_ECDSA_P256_SHA_256",
                 "validFor": {
                     "start": "2021-03-14T00:00:00.000Z"

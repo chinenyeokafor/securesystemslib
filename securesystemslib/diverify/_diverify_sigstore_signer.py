@@ -9,14 +9,18 @@ from urllib import parse
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
-from cryptography.x509 import CertificateSigningRequestBuilder, Name, NameAttribute, BasicConstraints
+from cryptography.x509 import (
+    CertificateSigningRequestBuilder, Name, NameAttribute, 
+    BasicConstraints, ObjectIdentifier, UnrecognizedExtension
+)
 from cryptography.x509.oid import NameOID
 from typing import Tuple, Optional
 import base64
 import requests
 from urllib.parse import urljoin
 from typing import Dict
-
+import jwt
+from securesystemslib.diverify.util import perf_utils
 
 from securesystemslib.exceptions import (
     UnsupportedLibraryError,
@@ -52,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 
 
-class SigstoreKey(Key):
+class SigstoredKey(Key):
     """Sigstore verifier.
 
     NOTE: The Sigstore key and signature serialization formats are not yet
@@ -60,8 +64,11 @@ class SigstoreKey(Key):
     and may not be supported by other implementations.
     """
 
-    DEFAULT_KEY_TYPE = "diverify"
-    DEFAULT_SCHEME = "diverify"
+    # DEFAULT_KEY_TYPE = "diverify"
+    # DEFAULT_SCHEME = "diverify"
+
+    DEFAULT_KEY_TYPE = "sigstore-oidc"
+    DEFAULT_SCHEME = "Fulcio"
 
     def __init__(
         self,
@@ -77,7 +84,7 @@ class SigstoreKey(Key):
         super().__init__(keyid, keytype, scheme, keyval, unrecognized_fields)
 
     @classmethod
-    def from_dict(cls, keyid: str, key_dict: dict[str, Any]) -> SigstoreKey:
+    def from_dict(cls, keyid: str, key_dict: dict[str, Any]) -> SigstoredKey:
         keytype, scheme, keyval = cls._from_dict(key_dict)
         return cls(keyid, keytype, scheme, keyval, key_dict)
 
@@ -102,16 +109,12 @@ class SigstoreKey(Key):
             from pathlib import Path
             import os
             from securesystemslib.diverify.policy import PolicyEvaluator
+            breakpoint()
             path = Path(os.path.join(os.path.dirname(__file__), "trusted_root.json"))
             verifier = Verifier(rekor=RekorClient(DEFAULT_REKOR_URL), trusted_root=TrustedRoot(_TrustedRoot().from_json(path.read_bytes())))
 
             bundle_data = signature.unrecognized_fields["bundle"]
             bundle = Bundle.from_json(json.dumps(bundle_data))
-
-            # this verifies the embedded quote
-            # TODO: add support for verifying the quote
-            # verify_quote(bundle.signing_certificate.quote)
-            
 
             # this verifies the signature against the policy
             # the policy file should be fetched from TUF. for now we are using a local file
@@ -119,10 +122,10 @@ class SigstoreKey(Key):
             if not policy_path.exists():
                 raise FileNotFoundError(f"Policy file not found: {policy_path}")
             policy_evaluator = PolicyEvaluator(policy_path) 
-            result = policy_evaluator.evaluate(self.keyval, bundle.signing_certificate)
+            result = policy_evaluator.evaluate(bundle.signing_certificate)
             if not result:
-                raise VerificationError("Policy evaluation failed")
-
+                raise VerificationError("The signature does not meet the policy constraints.")
+            logger.info("Policy evaluation passed")
 
             identity = Identity(
                 identity=self.keyval["identity"], issuer=self.keyval["issuer"]
@@ -146,7 +149,7 @@ class SigstoreKey(Key):
             ) from e
 
 
-class SigstoreSigner(Signer):
+class SigstoredSigner(Signer):
     """Sigstore signer.
 
     NOTE: The Sigstore key and signature serialization formats are not yet
@@ -207,19 +210,19 @@ class SigstoreSigner(Signer):
         priv_key_uri: str,
         public_key: Key,
         secrets_handler: SecretsHandler | None = None,
-    ) -> SigstoreSigner:
+    ) -> SigstoredSigner:
         try:
             from sigstore.oidc import detect_credential
         except ImportError as e:
             raise UnsupportedLibraryError(IMPORT_ERROR) from e
 
-        if not isinstance(public_key, SigstoreKey):
-            raise ValueError(f"expected SigstoreKey for {priv_key_uri}")
+        if not isinstance(public_key, SigstoredKey):
+            raise ValueError(f"expected SigstoredKey for {priv_key_uri}")
 
         uri = parse.urlparse(priv_key_uri)
 
         if uri.scheme != cls.SCHEME:
-            raise ValueError(f"SigstoreSigner does not support {priv_key_uri}")
+            raise ValueError(f"SigstoredSigner does not support {priv_key_uri}")
 
         params = dict(parse.parse_qsl(uri.query))
         ambient = params.get("ambient", "true") == "true"
@@ -227,11 +230,13 @@ class SigstoreSigner(Signer):
         if not ambient:
             token, decoded_token = cls._get_identity_token(limit_scope=secrets_handler)
         else:
-            import jwt
             credential = detect_credential()
             if not credential:
-                raise RuntimeError("Failed to detect Sigstore credentials")
-            # token = IdentityToken(credential)
+                try:
+                    from securesystemslib.diverify.identity import get_token
+                    credential = get_token()
+                except:
+                    raise RuntimeError("Failed to detect credentials")
             token, decoded_token = credential, jwt.decode(credential, options={"verify_signature": False})
 
         key_identity = public_key.keyval["identity"]
@@ -261,7 +266,7 @@ class SigstoreSigner(Signer):
     @classmethod
     def import_(
         cls, identity: str, issuer: str, ambient: bool = True
-    ) -> tuple[str, SigstoreKey]:
+    ) -> tuple[str, SigstoredKey]:
         """Create public key and signer URI.
 
         Returns a private key URI (for Signer.from_priv_key_uri()) and a public
@@ -273,11 +278,11 @@ class SigstoreSigner(Signer):
             issuer: The OIDC issuer to use when verifying a signature.
             ambient: Toggle usage of ambient credentials in returned URI.
         """
-        keytype = SigstoreKey.DEFAULT_KEY_TYPE
-        scheme = SigstoreKey.DEFAULT_SCHEME
+        keytype = SigstoredKey.DEFAULT_KEY_TYPE
+        scheme = SigstoredKey.DEFAULT_SCHEME
         keyval = {"identity": identity, "issuer": issuer}
         keyid = compute_default_keyid(keytype, scheme, keyval)
-        key = SigstoreKey(keyid, keytype, scheme, keyval)
+        key = SigstoredKey(keyid, keytype, scheme, keyval)
         uri = cls._get_uri(ambient)
 
         return uri, key 
@@ -290,7 +295,7 @@ class SigstoreSigner(Signer):
         client_id = "sigstore"
         client_secret = ""
 
-        auth_code, redirect_uri, code_verifier = SigstoreSigner.get_authorization_code(client_id, client_secret, limit_scope=limit_scope)
+        auth_code, redirect_uri, code_verifier = SigstoredSigner.get_authorization_code(client_id, client_secret, limit_scope=limit_scope)
 
         response = requests.post(
             "http://sigstore-dex:6000/token",
@@ -348,7 +353,7 @@ class SigstoreSigner(Signer):
         redirect_uri = f"http://localhost:{port}/callback"
         
         # Generate PKCE parameters
-        code_verifier, code_challenge = SigstoreSigner._generate_pkce_challenge()
+        code_verifier, code_challenge = SigstoredSigner._generate_pkce_challenge()
         state, nonce = str(uuid.uuid4()), str(uuid.uuid4())
 
         # Commenting this off till Dex is updated to support repo scope
@@ -394,20 +399,21 @@ class SigstoreSigner(Signer):
         private_key = ec.generate_private_key(ec.SECP256R1())
         return private_key
 
-    def create_csr(self, email_address: str) -> str:
-        csr_builder = CertificateSigningRequestBuilder().subject_name(
-            Name([
-                NameAttribute(NameOID.EMAIL_ADDRESS, email_address),
-            ])
-        ).add_extension(
-            BasicConstraints(ca=False, path_length=None),
-            critical=True
-        )
-    
+    def create_csr(self, email_address: str, diverify_proof: bytes) -> CertificateSigningRequestBuilder:
+        DIVERIFY_PROOF_OID = ObjectIdentifier("1.3.6.1.4.1.57264.1.23")
+
+        csr_builder = (
+            CertificateSigningRequestBuilder()
+            .subject_name(Name([NameAttribute(NameOID.EMAIL_ADDRESS, email_address)]))
+            .add_extension(BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(
+                UnrecognizedExtension(DIVERIFY_PROOF_OID, diverify_proof),
+                critical=False
+                )
+            )
         return csr_builder
     
-
-    def sign(self, payload: bytes) -> Signature:
+    def sign(self, payload: bytes, diverify_proof: Dict) -> Signature:
         """Signs payload using the OIDC token and submit the signature to the transparency log
 
         Arguments:
@@ -416,13 +422,14 @@ class SigstoreSigner(Signer):
             Integrated entry
         """
         private_key = self.generate_key_pair()
+        
 
         # Create CSR
         try:
             email_address = self._decoded_token['email']
         except:
             email_address = self._decoded_token['sub']
-        csr = self.create_csr(email_address).sign(private_key, hashes.SHA256())
+        csr = self.create_csr(email_address, json.dumps(diverify_proof).encode()).sign(private_key, hashes.SHA256())
 
         # We assume identity token is valid and send CSR to Fulcio
         certificate_response = self.get_fulcio_cert(csr, self._token)
@@ -435,7 +442,8 @@ class SigstoreSigner(Signer):
                 "artifact_signature": artifact_signature,
                 "signing_cert": certificate_response.cert
             }
-        return self.submit_to_tlog(signature_material)
+        return signature_material
+        # return self.submit_to_tlog(signature_material)
 
     
     from dataclasses import dataclass
@@ -445,6 +453,7 @@ class SigstoreSigner(Signer):
         cert: object
         chain: List[object]
 
+    @perf_utils.measure_latency
     def get_fulcio_cert(self, csr, identity):
         from cryptography.x509 import load_pem_x509_certificate
         
@@ -496,7 +505,7 @@ class SigstoreSigner(Signer):
     @classmethod
     def import_github_actions(
         cls, project: str, workflow_path: str, ref: str | None = "refs/heads/main"
-    ) -> tuple[str, SigstoreKey]:
+    ) -> tuple[str, SigstoredKey]:
         """Convenience method to build identity and issuer string for import_() from
         GitHub project and workflow path.
 
@@ -509,7 +518,7 @@ class SigstoreSigner(Signer):
 
         Returns:
             uri: string
-            key: SigstoreKey
+            key: SigstoredKey
 
         """
         identity = f"https://github.com/{project}/{workflow_path}@{ref}"
