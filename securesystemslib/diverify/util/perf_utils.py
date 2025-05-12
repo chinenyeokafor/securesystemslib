@@ -35,7 +35,6 @@ def measure_latency(func):
             start = time.perf_counter()
             result = func(*args, **kwargs)
             duration = (time.perf_counter() - start) * 1000
-            # logger.info(f"[PERF] ({TEST_MODE}) {func.__name__} took {duration:.2f}ms")
 
             with _log_path.open("a", newline="") as f:
                 writer = csv.writer(f)

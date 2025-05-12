@@ -22,16 +22,6 @@ def generate_policy():
 
     signer_measurement = input("Enter the signer measurement (e.g. hash or measurement string): ").strip()
 
-    ra_required = prompt_yes_no("Is remote attestation (RA) required?")
-    ra_policy = {}
-    if ra_required:
-        minimum_tcb = input("Enter minimum TCB version (e.g. 2024-04): ").strip()
-        disallow_debug = prompt_yes_no("Disallow debug mode in RA policy?")
-        ra_policy = {
-            "minimum_tcb": minimum_tcb,
-            "disallow_debug": disallow_debug
-        }
-
     rule = input("Enter logical trust rule (e.g. (identity AND provider)): ").strip()
 
     policy = {
@@ -39,11 +29,10 @@ def generate_policy():
         "provider": provider,
         "device_fingerprint": device_fingerprint,
         "security_key": {
-            "slot9a_public_key": slot9a_public_key
+            "slot9a_public_key": slot9a_public_key,
+            "slotf9_attestation_cert": slotf9_attestation_cert,
         },
         "signer_measurement": signer_measurement,
-        "ra_required": ra_required,
-        "ra_policy": ra_policy if ra_required else {},
         "rule": rule
     }
 

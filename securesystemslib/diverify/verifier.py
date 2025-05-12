@@ -1,25 +1,25 @@
-from securesystemslib.signer._signer import Signature
-from securesystemslib.diverify.policy import PolicyEvaluator
-from securesystemslib.exceptions import VerificationError, UnverifiedSignatureError
-import logging
-from pathlib import Path
+
 import os
 import json
-from typing import cast
 import base64
 import hashlib
-from cryptography.hazmat.primitives import serialization
+import logging
+from typing import cast
+from pathlib import Path
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.utils import Prehashed
+from securesystemslib.signer._signer import Signature
+from securesystemslib.diverify.policy import PolicyEvaluator
+from securesystemslib.exceptions import VerificationError, UnverifiedSignatureError
 from securesystemslib.diverify.util import perf_utils
-from DiVerify.daemon.quote import verify_quote, validate_user_data
+from securesystemslib.diverify.daemon.quote import verify_quote, validate_user_data
+from securesystemslib.diverify._diverify_sigstore_signer import DEFAULT_REKOR_URL
 
 logger = logging.getLogger(__name__)
 
-from securesystemslib.diverify._diverify_sigstore_signer import DEFAULT_REKOR_URL
 IMPORT_ERROR = "Required dependencies for signature verification are not installed."
 
 def verify_signature(signature: Signature, data: bytes, identity: str, issuer: str, policy: str) -> None:
@@ -133,55 +133,3 @@ def _verif_quote(quote):
 def check_size(cert):
     cert_bytes = cert.public_bytes(serialization.Encoding.DER)
     print(f"Size in bytes: {len(cert_bytes)}")
-
-# def verify(quote_path):
-#     try:
-#         logger.debug("Starting SGX quote verification process")
-        
-#         base_dir = "/home/SGXDataCenterAttestationPrimitives/SampleCode/QuoteVerificationSample"
-#         verification_app = os.path.join(base_dir, "app")
-#         if not os.path.exists(verification_app):
-#             logging.error(f"Verification tool not found at {verification_app}.")
-#             return False
-            
-#         if not os.path.exists(quote_path):
-#             logging.error(f"Quote file not found at {quote_path}")
-#             return False
-#         result = subprocess.run([verification_app, "-quote", quote_path],cwd=base_dir,capture_output=True,text=True,check=False)
-        
-#         if "Verification completed successfully" in result.stdout:
-#             logging.info("Quote verification succeeded")
-#             logging.debug(f"Verification output:\n{result.stdout}")
-#             return True
-#         elif "Warning: App: Verification completed, but collateral is out of date based " in result.stdout:
-#             return True
-#         else:
-#             logging.error("Quote verification failed")
-#             if result.stderr:
-#                 logging.error(f"Error output:\n{result.stderr}")
-#             else:
-#                 logging.error(f"Tool output:\n{result.stdout}")
-#             return False
-            
-#     except subprocess.CalledProcessError as e:
-#         logging.error(f"Verification process failed with exit code {e.returncode}")
-#         logging.debug(f"Process output:\n{e.stderr if e.stderr else e.stdout}")
-#         return False
-#     except Exception as e:
-#         logging.error(f"Unexpected error during verification: {str(e)}", exc_info=True)
-#         return False
-    
-# def verify_quote(quote_data):
-#     """Verify a quote received as byte data."""
-#     try:
-#         with tempfile.NamedTemporaryFile(suffix=".dat", delete=False) as temp_file:
-#             temp_file.write(quote_data)
-#             temp_path = temp_file.name
-#         return verify(temp_path)
-#     except Exception as e:
-#         print(f"Verification failed: {e}")
-#         return False
-#     finally:
-#         os.unlink(temp_path) if 'temp_path' in locals() and os.path.exists(temp_path) else None
-
-  
